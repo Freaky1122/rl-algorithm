@@ -8,17 +8,18 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 
 class Actor(nn.Module):
-    def __init__(self, state_dim, action_dim, max_action):
+    def __init__(self, state_dim, action_dim, max_action, hidden_dim=128):
         super(Actor, self).__init__()
 
         self.model = nn.Sequential(
-            nn.Linear(state_dim, 400),
+            nn.Linear(state_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(400, 300),
+            nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(300, action_dim),
+            nn.Linear(hidden_dim, action_dim),
             nn.Tanh()
         )
+
         self.max_action = max_action
 
     def forward(self, state):
@@ -26,21 +27,21 @@ class Actor(nn.Module):
 
 
 class Critic(nn.Module):
-    def __init__(self, state_dim, action_dim):
+    def __init__(self, state_dim, action_dim, hidden_dim=128):
         super(Critic, self).__init__()
 
-        self.l1 = nn.Linear(state_dim, 400)
-        self.l2 = nn.Linear(400 + action_dim, 300)
-        self.l3 = nn.Linear(300, 1)
+        self.l1 = nn.Linear(state_dim, hidden_dim)
+        self.l2 = nn.Linear(hidden_dim, hidden_dim)
+        self.l3 = nn.Linear(hidden_dim, 1)
 
     def forward(self, state, action):
         q = F.relu(self.l1(state))
-        q = F.relu(torch.cat([q, action], 1))
+        q = F.relu(self.l2(q))
         return self.l3(q)
 
 
 class DDPG(object):
-    def __init__(self, state_dim, action_dim, max_action, discount=0.99, tau=0.001):
+    def __init__(self, state_dim, action_dim, max_action, gamma=0.99, tau=0.005):
         self.actor = Actor(state_dim, action_dim, max_action).to(device)
         self.actor_target = copy.deepcopy(self.actor)
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=1e-4)
@@ -49,18 +50,18 @@ class DDPG(object):
         self.critic_target = copy.deepcopy(self.critic)
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), weight_decay=1e-2)
 
-        self.discount = discount
+        self.gamma = gamma
         self.tau = tau
 
-    def select_action(self, state):
-        state = torch.FloatTensor(state.reshape(1, -1)).to(device)
-        return self.actor(state)
+    def choose_action(self, state):
+        state = torch.FloatTensor(state).unsqueeze(0).to(device)
+        return self.actor(state).cpu().detach().numpy().flatten()
 
     def train(self, reply_buffer, batch_size=64):
-        state, action, next_state, reward, terminated = reply_buffer.sample(batch_size)
+        state, action, next_state, reward, done = reply_buffer.sample(batch_size)
 
         target_Q = self.critic_target(next_state, self.actor_target(next_state))
-        target_Q = reward + (terminated * self.discount * target_Q).detach()
+        target_Q = reward + ((1 - done) * self.gamma * target_Q).detach()
 
         # compute Critic loss
         current_Q = self.critic(state, action)
