@@ -36,7 +36,7 @@ class DQN(object):
         if np.random.uniform(0, 1) > self.epsilon:
             action = np.random.randint(0, self.action_dim)
         else:
-            state = torch.FloatTensor(state).unsqueeze(0).to(device)
+            state = torch.FloatTensor(state.reshape(1, -1)).to(device)
             action = self.QNet(state).argmax().item()
         return action
 
@@ -45,9 +45,9 @@ class DQN(object):
 
         next_max_q = self.target_QNet(next_state).max(1)[0].view(-1, 1)
         target_q = reward + self.gamma * next_max_q * (1 - terminated)
-
+        print("targetQ:{}".format(target_q))
         predict_q = self.QNet(state).gather(1, action)[:, 0].view(-1, 1)
-
+        print("predictQ:{}".format(predict_q))
         loss = F.mse_loss(predict_q, target_q)
 
         self.optimizer.zero_grad()
